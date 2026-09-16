@@ -1,2 +1,1 @@
-# Enterprise-AI
-AI Employee
+# Enterprise AI
