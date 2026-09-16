@@ -1,0 +1,5 @@
+import { WorkspaceShell } from "@/components/workspace-shell";
+import styles from "./page.module.css";
+
+const sources = [["Product & brand", "42 files", "Updated 2h ago", "PB"], ["People operations", "18 files", "Updated yesterday", "PO"], ["Customer playbooks", "31 files", "Updated 3 days ago", "CP"]];
+export default function KnowledgePage() { return <WorkspaceShell><section className={styles.heading}><div><p>KNOWLEDGE BASE</p><h1>Company knowledge</h1><span>Give your AI employees the context they need to do their best work.</span></div><button type="button">＋ Add source</button></section><section className={styles.search}><span>⌕</span><input aria-label="Search knowledge" placeholder="Search knowledge sources and files" /></section><section className={styles.list}>{sources.map(([name, files, date, initials]) => <article key={name}><span className={styles.sourceIcon}>{initials}</span><div><h2>{name}</h2><p>{files} · {date}</p></div><span className={styles.status}>Synced</span><button type="button" aria-label={`More options for ${name}`}>•••</button></article>)}</section></WorkspaceShell>; }

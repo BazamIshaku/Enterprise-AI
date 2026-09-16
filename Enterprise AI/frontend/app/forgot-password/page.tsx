@@ -1,0 +1,7 @@
+"use client";
+import Link from "next/link";
+import Image from "next/image";
+import { FormEvent, useState } from "react";
+import { requestPasswordReset } from "@/lib/eunia-api";
+import styles from "../auth.module.css";
+export default function ForgotPasswordPage() { const [message, setMessage] = useState(""); const [error, setError] = useState(""); async function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setError(""); try { const result = await requestPasswordReset(String(new FormData(event.currentTarget).get("email"))); setMessage(result.message); } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to request a reset."); } } return <main className={styles.page}><section className={styles.card}><Link className={styles.brand} href="/"><Image className={styles.brandMark} src="/brand/eunia-nia-mark.png" alt="" width={28} height={28} priority />EUNIA</Link><p className={styles.eyebrow}>ACCOUNT RECOVERY</p><h1>Reset your password</h1><p className={styles.subtitle}>Enter your email and we’ll send reset instructions if an account exists.</p><form onSubmit={submit}><label>Work email<input name="email" type="email" required autoComplete="email" /></label>{error && <p className={styles.error}>{error}</p>}{message && <p className={styles.success}>{message}</p>}<button type="submit">Send reset instructions</button></form><p className={styles.switch}><Link href="/sign-in">Back to sign in</Link></p></section></main>; }

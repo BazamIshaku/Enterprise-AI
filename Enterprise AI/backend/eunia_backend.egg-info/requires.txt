@@ -1,0 +1,16 @@
+fastapi<1.0,>=0.115
+httpx<1.0,>=0.27
+alembic<2.0,>=1.14
+email-validator<3.0,>=2.2
+pydantic<3.0,>=2.9
+python-dotenv<2.0,>=1.0
+PyJWT<3.0,>=2.9
+pwdlib[argon2]<1.0,>=0.2
+sqlalchemy<3.0,>=2.0
+uvicorn[standard]<1.0,>=0.30
+
+[dev]
+pytest<9.0,>=8.0
+
+[postgres]
+psycopg[binary]<4.0,>=3.2
