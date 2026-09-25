@@ -100,7 +100,7 @@ class WorkTask(TimestampedModel, Base):
     status: Mapped[str] = mapped_column(String(24), default="queued")
     stage: Mapped[str] = mapped_column(String(100), default="Waiting for the AI employee")
     progress: Mapped[int] = mapped_column(Integer, default=5)
-    risk_level: Mapped[str] = mapped_column(String(16), default="standard")
+    risk_level: Mapped[str] = mapped_column(String(24), default="standard")
     result: Mapped[str | None] = mapped_column(Text, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
