@@ -4,7 +4,9 @@ import os
 import jwt
 from pwdlib import PasswordHash
 
-JWT_SECRET = os.getenv("JWT_SECRET", "change-this-local-development-secret")
+JWT_SECRET = os.getenv("JWT_SECRET", "")
+if len(JWT_SECRET) < 32:
+    raise RuntimeError("JWT_SECRET must be configured with at least 32 characters")
 JWT_ALGORITHM = "HS256"
 password_hash = PasswordHash.recommended()
 

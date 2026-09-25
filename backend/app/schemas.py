@@ -44,7 +44,9 @@ class AssistantCreate(BaseModel):
     name: str = Field(min_length=2, max_length=120)
     role: str = Field(min_length=2, max_length=160)
     department: str = Field(min_length=2, max_length=120)
+    role_template_id: str = Field(min_length=2, max_length=80)
     status: Literal["active", "draft"] = "draft"
+    access_level: Literal["admins_only", "workspace"] = "admins_only"
     capabilities: list[str] = Field(default_factory=list, max_length=12)
     instructions: str | None = Field(default=None, max_length=8000)
 
@@ -55,6 +57,32 @@ class AssistantResponse(AssistantCreate):
     workspace_id: str
     created_at: datetime
     updated_at: datetime
+
+
+class CatalogDepartment(BaseModel):
+    id: str
+    name: str
+
+
+class CatalogRole(BaseModel):
+    id: str
+    department_id: str
+    name: str
+    description: str
+    capabilities: list[str]
+
+
+class KnowledgeDocumentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    workspace_id: str
+    assistant_id: str
+    file_name: str
+    content_type: str
+    size_bytes: int
+    status: str
+    feedback: str
+    created_at: datetime
 
 
 class ConversationCreate(BaseModel):

@@ -2,7 +2,7 @@
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, JSON, String, Text, UniqueConstraint, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, JSON, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .database import Base
@@ -48,9 +48,25 @@ class Assistant(TimestampedModel, Base):
     name: Mapped[str] = mapped_column(String(120))
     role: Mapped[str] = mapped_column(String(160))
     department: Mapped[str] = mapped_column(String(120))
+    role_template_id: Mapped[str] = mapped_column(String(80), default="legacy")
     status: Mapped[str] = mapped_column(String(16), default="draft")
+    access_level: Mapped[str] = mapped_column(String(32), default="admins_only")
     capabilities: Mapped[list[str]] = mapped_column(JSON, default=list)
     instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class KnowledgeDocument(TimestampedModel, Base):
+    __tablename__ = "knowledge_documents"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    assistant_id: Mapped[str] = mapped_column(ForeignKey("assistants.id", ondelete="CASCADE"), index=True)
+    uploaded_by: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
+    file_name: Mapped[str] = mapped_column(String(255))
+    storage_key: Mapped[str] = mapped_column(String(255), unique=True)
+    content_type: Mapped[str] = mapped_column(String(120))
+    size_bytes: Mapped[int] = mapped_column(BigInteger)
+    status: Mapped[str] = mapped_column(String(24), default="queued")
+    feedback: Mapped[str] = mapped_column(Text, default="Securely uploaded. This AI employee will review the file and report when knowledge processing is complete.")
 
 
 class Conversation(TimestampedModel, Base):

@@ -2,7 +2,6 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import Image from "next/image";
-import type { KokoroTTS } from "kokoro-js";
 import { useSession } from "@/components/session-provider";
 import { WorkspaceShell } from "@/components/workspace-shell";
 import { createConversation, listMessages, streamNiaReply, type NiaMessage } from "@/lib/eunia-api";
@@ -10,10 +9,7 @@ import styles from "./page.module.css";
 
 const suggestions = ["Summarise this week's priorities", "Prepare a customer briefing", "Find the latest brand guidelines"];
 const conversationKey = "eunia.activeConversation";
-const kokoroModel = "onnx-community/Kokoro-82M-v1.0-ONNX";
-
-let niaVoicePromise: Promise<KokoroTTS> | null = null;
-let activeNiaAudio: { audio: HTMLAudioElement; finish: () => void } | null = null;
+let activeNiaSpeech: { utterance: SpeechSynthesisUtterance; finish: () => void } | null = null;
 let niaSpeechSession = 0;
 
 type SpeechResult = {
@@ -42,27 +38,11 @@ type BrowserSpeechWindow = Window & typeof globalThis & {
   webkitSpeechRecognition?: new () => BrowserSpeechRecognition;
 };
 
-function loadNiaVoice(): Promise<KokoroTTS> {
-  if (!niaVoicePromise) {
-    niaVoicePromise = import("kokoro-js")
-      .then(({ KokoroTTS }) => KokoroTTS.from_pretrained(kokoroModel, { dtype: "q8", device: "wasm" }))
-      .catch((error) => {
-        niaVoicePromise = null;
-        throw error;
-      });
-  }
-
-  return niaVoicePromise;
-}
-
 function stopNiaVoice() {
   niaSpeechSession += 1;
-  if (!activeNiaAudio) return;
-
-  const activeAudio = activeNiaAudio;
-  activeNiaAudio = null;
-  activeAudio.audio.pause();
-  activeAudio.finish();
+  window.speechSynthesis?.cancel();
+  activeNiaSpeech?.finish();
+  activeNiaSpeech = null;
 }
 
 function speechText(markdown: string) {
@@ -96,32 +76,27 @@ async function speakNiaChunk(text: string, session: number, onStatus: (status: "
   const spokenText = speechText(text);
   if (!spokenText || session !== niaSpeechSession) return;
 
-  const voice = await loadNiaVoice();
-  if (session !== niaSpeechSession) return;
-
-  const generatedAudio = await voice.generate(spokenText, { voice: "af_heart", speed: 1.12 });
-  if (session !== niaSpeechSession) return;
-
-  const audioUrl = URL.createObjectURL(generatedAudio.toBlob());
-  const audio = new Audio(audioUrl);
+  if (!("speechSynthesis" in window)) throw new Error("Voice playback is not supported by this browser.");
+  const utterance = new SpeechSynthesisUtterance(spokenText);
+  utterance.rate = 1.08;
+  utterance.pitch = 1;
 
   await new Promise<void>((resolve) => {
     let settled = false;
     const finish = () => {
       if (settled) return;
       settled = true;
-      audio.onended = null;
-      audio.onerror = null;
-      if (activeNiaAudio?.audio === audio) activeNiaAudio = null;
-      URL.revokeObjectURL(audioUrl);
+      utterance.onend = null;
+      utterance.onerror = null;
+      if (activeNiaSpeech?.utterance === utterance) activeNiaSpeech = null;
       resolve();
     };
 
-    activeNiaAudio = { audio, finish };
-    audio.onended = finish;
-    audio.onerror = finish;
+    activeNiaSpeech = { utterance, finish };
+    utterance.onend = finish;
+    utterance.onerror = finish;
     onStatus("speaking");
-    void audio.play().catch(finish);
+    window.speechSynthesis.speak(utterance);
   });
 
   if (session === niaSpeechSession) onStatus("ready");
@@ -177,13 +152,13 @@ export default function DashboardPage() {
     setVoiceError("");
 
     try {
-      await loadNiaVoice();
+      if (!("speechSynthesis" in window)) throw new Error("Voice playback is unavailable");
       if (voiceRequested.current) setVoiceStatus("ready");
     } catch {
       voiceRequested.current = false;
       setVoiceEnabled(false);
       setVoiceStatus("off");
-      setVoiceError("NIA's voice could not load. Check your internet connection and try again.");
+      setVoiceError("NIA's voice is not supported by this browser.");
     }
   }
 

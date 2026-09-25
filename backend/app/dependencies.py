@@ -32,3 +32,13 @@ def get_workspace(x_workspace_id: Annotated[str, Header()], user: Annotated[User
     if workspace is None or membership is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have access to this workspace")
     return workspace
+
+
+def get_admin_workspace(x_workspace_id: Annotated[str, Header()], user: Annotated[User, Depends(get_current_user)], session: SessionDependency) -> Workspace:
+    workspace = session.get(Workspace, x_workspace_id)
+    membership = session.scalar(select(Membership).where(Membership.user_id == user.id, Membership.workspace_id == x_workspace_id))
+    if workspace is None or membership is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have access to this workspace")
+    if membership.role not in {"owner", "admin"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrator access is required")
+    return workspace

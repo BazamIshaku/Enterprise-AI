@@ -7,7 +7,8 @@ WORKDIR /app
 
 COPY pyproject.toml ./
 COPY app ./app
-RUN pip install --no-cache-dir ".[postgres]"
+RUN python -m pip install --no-cache-dir --upgrade pip==26.2.1 \
+    && pip install --no-cache-dir ".[postgres]"
 
 COPY alembic.ini ./
 COPY alembic ./alembic

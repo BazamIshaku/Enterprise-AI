@@ -20,7 +20,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     if (!token || !savedWorkspace || !savedUser) { setLoading(false); return; }
     try {
       const workspace = JSON.parse(savedWorkspace) as Workspace;
-      const user = JSON.parse(savedUser) as CurrentUser;
+      JSON.parse(savedUser) as CurrentUser;
       Promise.all([getCurrentUser(token), listWorkspaces(token)]).then(([currentUser, workspaces]) => {
         const currentWorkspace = workspaces.find((item) => item.id === workspace.id);
         if (!currentWorkspace) throw new Error("Workspace is no longer available");

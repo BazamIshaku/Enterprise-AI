@@ -1,21 +1,51 @@
 """Version-one HTTP routes."""
 import json
+import os
 import re
+from pathlib import Path
 from typing import Annotated
-from fastapi import APIRouter, Depends, HTTPException, status
+from uuid import uuid4
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .database import get_session
-from .dependencies import get_current_user, get_workspace
-from .models import Assistant, Conversation, Membership, Message, User, Workspace
+from .catalog import DEPARTMENTS, DEPARTMENT_BY_ID, ROLE_BY_ID, ROLE_TEMPLATES
+from .dependencies import get_admin_workspace, get_current_user, get_workspace
+from .models import Assistant, Conversation, KnowledgeDocument, Membership, Message, User, Workspace
 from .nia import stream_reply
-from .schemas import AssistantCreate, AssistantResponse, ConversationCreate, ConversationResponse, LoginRequest, MessageCreate, MessageResponse, PasswordResetRequest, RegisterRequest, TokenResponse, UserResponse, WorkspaceResponse
+from .schemas import AssistantCreate, AssistantResponse, CatalogDepartment, CatalogRole, ConversationCreate, ConversationResponse, KnowledgeDocumentResponse, LoginRequest, MessageCreate, MessageResponse, PasswordResetRequest, RegisterRequest, TokenResponse, UserResponse, WorkspaceResponse
 from .security import create_access_token, hash_password, verify_password
 
 router = APIRouter(prefix="/api/v1")
 SessionDependency = Annotated[Session, Depends(get_session)]
+UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "./private_uploads"))
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+ALLOWED_UPLOADS = {
+    ".pdf": {"application/pdf"},
+    ".txt": {"text/plain"},
+    ".csv": {"text/csv", "application/vnd.ms-excel"},
+    ".docx": {"application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
+    ".png": {"image/png"},
+    ".jpg": {"image/jpeg"},
+    ".jpeg": {"image/jpeg"},
+    ".webp": {"image/webp"},
+}
+
+
+def content_matches_extension(suffix: str, sample: bytes) -> bool:
+    if suffix == ".pdf":
+        return sample.startswith(b"%PDF-")
+    if suffix == ".docx":
+        return sample.startswith(b"PK\x03\x04")
+    if suffix == ".png":
+        return sample.startswith(b"\x89PNG\r\n\x1a\n")
+    if suffix in {".jpg", ".jpeg"}:
+        return sample.startswith(b"\xff\xd8\xff")
+    if suffix == ".webp":
+        return len(sample) >= 12 and sample.startswith(b"RIFF") and sample[8:12] == b"WEBP"
+    return b"\x00" not in sample
 
 
 def workspace_slug(name: str) -> str:
@@ -64,18 +94,92 @@ def list_workspaces(user: Annotated[User, Depends(get_current_user)], session: S
     return list(session.scalars(select(Workspace).join(Membership).where(Membership.user_id == user.id).order_by(Workspace.name)))
 
 
+@router.get("/catalog/departments", response_model=list[CatalogDepartment])
+def list_departments(_: Annotated[User, Depends(get_current_user)]) -> list[dict]:
+    return DEPARTMENTS
+
+
+@router.get("/catalog/roles", response_model=list[CatalogRole])
+def list_roles(_: Annotated[User, Depends(get_current_user)]) -> list[dict]:
+    return ROLE_TEMPLATES
+
+
 @router.get("/assistants", response_model=list[AssistantResponse])
 def list_assistants(workspace: Annotated[Workspace, Depends(get_workspace)], session: SessionDependency) -> list[Assistant]:
     return list(session.scalars(select(Assistant).where(Assistant.workspace_id == workspace.id).order_by(Assistant.created_at.desc())))
 
 
 @router.post("/assistants", response_model=AssistantResponse, status_code=status.HTTP_201_CREATED)
-def create_assistant(payload: AssistantCreate, workspace: Annotated[Workspace, Depends(get_workspace)], session: SessionDependency) -> Assistant:
-    assistant = Assistant(workspace_id=workspace.id, **payload.model_dump())
+def create_assistant(payload: AssistantCreate, workspace: Annotated[Workspace, Depends(get_admin_workspace)], session: SessionDependency) -> Assistant:
+    department = DEPARTMENT_BY_ID.get(payload.department)
+    role = ROLE_BY_ID.get(payload.role_template_id)
+    if department is None:
+        raise HTTPException(status_code=422, detail="Choose a valid department")
+    if role is None or role["department_id"] != payload.department:
+        raise HTTPException(status_code=422, detail="Choose a role that belongs to this department")
+    values = payload.model_dump()
+    values["department"] = department["name"]
+    values["role"] = role["name"]
+    if not values["capabilities"]:
+        values["capabilities"] = role["capabilities"]
+    assistant = Assistant(workspace_id=workspace.id, **values)
     session.add(assistant)
     session.commit()
     session.refresh(assistant)
     return assistant
+
+
+def assistant_for_workspace(assistant_id: str, workspace: Workspace, session: Session) -> Assistant:
+    assistant = session.get(Assistant, assistant_id)
+    if assistant is None or assistant.workspace_id != workspace.id:
+        raise HTTPException(status_code=404, detail="AI employee not found")
+    return assistant
+
+
+@router.get("/assistants/{assistant_id}/knowledge", response_model=list[KnowledgeDocumentResponse])
+def list_knowledge_documents(assistant_id: str, workspace: Annotated[Workspace, Depends(get_workspace)], session: SessionDependency) -> list[KnowledgeDocument]:
+    assistant_for_workspace(assistant_id, workspace, session)
+    return list(session.scalars(select(KnowledgeDocument).where(KnowledgeDocument.assistant_id == assistant_id, KnowledgeDocument.workspace_id == workspace.id).order_by(KnowledgeDocument.created_at.desc())))
+
+
+@router.post("/assistants/{assistant_id}/knowledge", response_model=KnowledgeDocumentResponse, status_code=status.HTTP_201_CREATED)
+async def upload_knowledge_document(assistant_id: str, file: Annotated[UploadFile, File()], workspace: Annotated[Workspace, Depends(get_admin_workspace)], user: Annotated[User, Depends(get_current_user)], session: SessionDependency) -> KnowledgeDocument:
+    assistant_for_workspace(assistant_id, workspace, session)
+    original_name = Path(file.filename or "").name
+    suffix = Path(original_name).suffix.lower()
+    if not original_name or len(original_name) > 255 or suffix not in ALLOWED_UPLOADS:
+        raise HTTPException(status_code=415, detail="Use PDF, DOCX, TXT, CSV, PNG, JPG, or WEBP files")
+    if file.content_type not in ALLOWED_UPLOADS[suffix]:
+        raise HTTPException(status_code=415, detail="The file type does not match its extension")
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    storage_key = f"{workspace.id}/{assistant_id}/{uuid4().hex}{suffix}"
+    destination = UPLOAD_DIR / storage_key
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    size = 0
+    sample = b""
+    try:
+        with destination.open("wb") as output:
+            while chunk := await file.read(1024 * 1024):
+                if not sample:
+                    sample = chunk[:32]
+                size += len(chunk)
+                if size > MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail="Files must be 10 MB or smaller")
+                output.write(chunk)
+        if size == 0:
+            raise HTTPException(status_code=422, detail="The uploaded file is empty")
+        if not content_matches_extension(suffix, sample):
+            raise HTTPException(status_code=415, detail="The file content does not match its extension")
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
+    finally:
+        await file.close()
+    document = KnowledgeDocument(workspace_id=workspace.id, assistant_id=assistant_id, uploaded_by=user.id, file_name=original_name, storage_key=storage_key, content_type=file.content_type, size_bytes=size, status="queued")
+    session.add(document)
+    session.commit()
+    session.refresh(document)
+    return document
 
 
 @router.get("/conversations", response_model=list[ConversationResponse])
