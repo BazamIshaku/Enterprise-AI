@@ -79,6 +79,9 @@ class CatalogRole(BaseModel):
     name: str
     description: str
     capabilities: list[str]
+    risk_tier: Literal["standard", "elevated", "restricted"]
+    oversight: str
+    limitations: list[str]
 
 
 class KnowledgeDocumentResponse(BaseModel):

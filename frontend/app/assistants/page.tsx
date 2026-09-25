@@ -80,7 +80,7 @@ export default function AssistantsPage() {
 
   return <WorkspaceShell>
     <section className={styles.header}>
-      <div><p className={styles.eyebrow}>AI WORKFORCE</p><h1>AI Employees</h1><p>Create governed teammates with a defined department, role, knowledge, and access boundary.</p></div>
+      <div><p className={styles.eyebrow}>AI WORKFORCE</p><h1>AI Employees</h1><p>Create supervised AI support roles with a defined department, permitted scope, knowledge, and access boundary.</p></div>
       <button className={styles.primaryButton} type="button" onClick={openCreate}>+ Create AI employee</button>
     </section>
 
@@ -115,10 +115,10 @@ export default function AssistantsPage() {
           <label>Department<select required value={departmentId} onChange={(event) => { setDepartmentId(event.target.value); setRoleId(""); }}><option value="">Select a department</option>{departments.map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}</select></label>
           <label className={styles.fullField}>Role template<select required disabled={!departmentId} value={roleId} onChange={(event) => setRoleId(event.target.value)}><option value="">{departmentId ? "Select a role" : "Choose a department first"}</option>{availableRoles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}</select></label>
         </div>
-        {selectedRole && <section className={styles.rolePreview}><span>ROLE STARTER</span><h3>{selectedRole.name}</h3><p>{selectedRole.description}</p><div>{selectedRole.capabilities.map((capability) => <strong key={capability}>{capability}</strong>)}</div></section>}
+        {selectedRole && <section className={styles.rolePreview}><div className={styles.roleTitle}><span>AI SUPPORT ROLE</span><em className={styles[selectedRole.risk_tier]}>{selectedRole.risk_tier} oversight</em></div><h3>{selectedRole.name}</h3><p>{selectedRole.description}</p><div>{selectedRole.capabilities.map((capability) => <strong key={capability}>{capability}</strong>)}</div><section className={styles.boundaries}><p><b>Human owner required.</b> {selectedRole.oversight}</p><ul>{selectedRole.limitations.map((limitation) => <li key={limitation}>{limitation}</li>)}</ul></section></section>}
         <label>Company instructions <small>Optional—do not include secrets here.</small><textarea name="instructions" maxLength={8000} rows={3} defaultValue={editing?.instructions ?? ""} placeholder="Describe responsibilities, boundaries, and when this employee must escalate." /></label>
         <div className={styles.formGrid}><label>Status<select name="status" defaultValue={editing?.status ?? "draft"}><option value="draft">Draft — training required</option><option value="active">Active</option></select></label><label>Who can change this employee?<select name="accessLevel" defaultValue={editing?.access_level ?? "admins_only"}><option value="admins_only">Admins only</option><option value="workspace">Workspace members</option></select></label></div>
-        <div className={styles.securityNote}><span>⌾</span><p><strong>Governed by default.</strong> Admin-only changes are recommended until knowledge and evaluation checks are complete.</p></div>
+        <div className={styles.securityNote}><span>⌾</span><p><strong>Assistive, never autonomous.</strong> AI employees prepare analysis and drafts. Accountable people retain decisions, approvals, and sensitive actions.</p></div>
         {error && <p className={styles.error}>{error}</p>}
         <div className={styles.modalActions}><button type="button" onClick={closeModal}>Cancel</button><button className={styles.primaryButton} disabled={saving || !selectedRole} type="submit">{saving ? "Saving…" : editing ? "Save changes" : "Create employee"}</button></div>
       </form>

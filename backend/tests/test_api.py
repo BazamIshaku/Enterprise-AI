@@ -33,12 +33,20 @@ def test_registration_and_assistant_access_are_workspace_scoped(tmp_path, monkey
         workspace_id = workspaces.json()[0]["id"]
         tenant_headers = auth_headers | {"X-Workspace-Id": workspace_id}
 
+        role_catalog = client.get("/api/v1/catalog/roles", headers=auth_headers)
+        assert role_catalog.status_code == 200
+        data_role = next(role for role in role_catalog.json() if role["id"] == "data-analyst")
+        assert data_role["name"] == "Data Analysis Assistant"
+        assert data_role["oversight"]
+        assert "Cannot make business decisions" in data_role["limitations"]
+
         created = client.post("/api/v1/assistants", headers=tenant_headers, json={
             "name": "Aria", "role": "Data Analyst", "department": "data", "role_template_id": "data-analyst", "status": "active", "access_level": "admins_only", "capabilities": [],
         })
         assert created.status_code == 201
         assert created.json()["workspace_id"] == workspace_id
         assert created.json()["department"] == "Data & Analytics"
+        assert created.json()["role"] == "Data Analysis Assistant"
         assistant_id = created.json()["id"]
 
         updated = client.patch(f"/api/v1/assistants/{assistant_id}", headers=tenant_headers, json={
