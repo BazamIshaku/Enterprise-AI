@@ -1,16 +1,19 @@
 .page { align-items: center; background: radial-gradient(circle at 82% 12%, #e9e2ff, transparent 28%), radial-gradient(circle at 10% 92%, #e2efff, transparent 28%), var(--canvas); display: flex; justify-content: center; min-height: 100vh; padding: 24px; }
 .card { animation: authEnter .45s both; background: rgba(255, 255, 255, .83); border: 1px solid #ffffffdf; border-radius: 28px; box-shadow: var(--shadow-lift); max-width: 440px; padding: 38px; width: 100%; }
+.signupCard { max-width: 500px; }
 .brand { align-items: center; color: #28213d; display: inline-flex; font-size: 17px; font-weight: 900; gap: 9px; letter-spacing: .14em; margin-bottom: 34px; }
 .brandMark { filter: drop-shadow(0 6px 10px #8e7be438); height: 29px; object-fit: contain; width: 29px; }
 .eyebrow { color: var(--primary); font-size: 10px; font-weight: 850; letter-spacing: .14em; margin: 0 0 10px; }
 .card h1 { font-size: 29px; letter-spacing: -.05em; margin: 0 0 9px; }.subtitle { color: var(--muted); font-size: 14px; line-height: 1.55; margin: 0 0 24px; }
-.card form { display: grid; gap: 15px; }.card label { color: #414957; display: grid; font-size: 12px; font-weight: 750; gap: 7px; }
-.nameFields { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.card input { background: #fbfbfe; border: 1px solid #e1e2eb; border-radius: 13px; color: var(--foreground); font: inherit; font-size: 14px; outline-color: var(--primary); padding: 12px; transition: border-color .2s ease, box-shadow .2s ease; }
+.card form { display: grid; gap: 17px; }.card label { color: #414957; display: grid; font-size: 12px; font-weight: 750; gap: 8px; min-width: 0; }
+.nameFields { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.card input { background: #fbfbfe; border: 1px solid #e1e2eb; border-radius: 13px; color: var(--foreground); font: inherit; font-size: 14px; min-width: 0; outline-color: var(--primary); padding: 13px 14px; transition: background-color .2s ease, border-color .2s ease, box-shadow .2s ease; width: 100%; }
+.card input::placeholder { color: #a2a7b4; font-weight: 500; }
 .card input:focus { border-color: #a194f7; box-shadow: 0 0 0 4px #8d7af018; }
+.card input:hover:not(:focus) { background: #fff; border-color: #d4d2e3; }
 .card button { background: linear-gradient(135deg, #8c80ff, var(--primary-deep)); border: 0; border-radius: 14px; box-shadow: 0 10px 19px #644ce133; color: white; cursor: pointer; font-weight: 800; margin-top: 5px; padding: 12px; transition: transform .2s ease, box-shadow .2s ease; }
 .card button:not(:disabled):hover { box-shadow: 0 14px 24px #644ce14c; transform: translateY(-2px); }.card button:disabled { cursor: wait; opacity: .65; }
 .error, .success { border-radius: 13px; font-size: 12px; margin: 0; padding: 10px; }.error { background: #fff0f2; color: #b2475d; }.success { background: #edfbf1; color: #287a4a; }
 .switch { color: var(--muted); font-size: 12px; margin: 24px 0 0; text-align: center; }.switch a, .forgot { color: var(--primary-deep); font-weight: 800; }.passwordField { align-items: center; display: flex; position: relative; }.passwordField input { width: 100%; }.card .reveal { background: transparent; box-shadow: none; color: var(--primary-deep); font-size: 11px; margin: 0; padding: 8px; position: absolute; right: 3px; }.card .reveal:hover { box-shadow: none; transform: none; }.forgot { font-size: 12px; margin-top: -7px; }
 @keyframes authEnter { from { opacity: 0; transform: translateY(14px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
-@media (max-width: 480px) { .nameFields { grid-template-columns: 1fr; } }
+@media (max-width: 560px) { .card { border-radius: 22px; padding: 30px 24px; } .nameFields { grid-template-columns: 1fr; } }
