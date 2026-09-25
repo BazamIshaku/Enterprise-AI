@@ -98,6 +98,67 @@ class KnowledgeDocumentResponse(BaseModel):
     created_at: datetime
 
 
+class MemberAdd(BaseModel):
+    email: EmailStr
+    role: Literal["member", "admin"] = "member"
+
+
+class MemberResponse(BaseModel):
+    id: str
+    user_id: str
+    email: EmailStr
+    full_name: str
+    role: str
+    created_at: datetime
+
+
+class WorkTaskCreate(BaseModel):
+    assistant_id: str
+    title: str = Field(min_length=3, max_length=180)
+    instructions: str = Field(min_length=10, max_length=12000)
+    expected_output: str | None = Field(default=None, max_length=4000)
+    priority: Literal["low", "normal", "high", "urgent"] = "normal"
+    due_at: datetime | None = None
+
+
+class WorkTaskResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    workspace_id: str
+    assistant_id: str
+    created_by: str
+    supervisor_id: str
+    title: str
+    instructions: str
+    expected_output: str | None
+    priority: str
+    due_at: datetime | None
+    status: str
+    stage: str
+    progress: int
+    risk_level: str
+    result: str | None
+    completed_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class TaskMessageCreate(BaseModel):
+    content: str = Field(min_length=1, max_length=12000)
+
+
+class TaskMessageResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    task_id: str
+    author_type: str
+    author_user_id: str | None
+    author_name: str
+    kind: str
+    content: str
+    created_at: datetime
+
+
 class ConversationCreate(BaseModel):
     title: str = Field(default="New conversation", min_length=1, max_length=160)
 

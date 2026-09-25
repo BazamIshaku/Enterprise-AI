@@ -2,6 +2,7 @@
 import json
 import os
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
@@ -13,10 +14,11 @@ from sqlalchemy.orm import Session
 from .database import get_session
 from .catalog import DEPARTMENTS, DEPARTMENT_BY_ID, ROLE_BY_ID, ROLE_TEMPLATES
 from .dependencies import get_admin_workspace, get_current_user, get_workspace
-from .models import Assistant, Conversation, KnowledgeDocument, Membership, Message, User, Workspace
+from .models import Assistant, Conversation, KnowledgeDocument, Membership, Message, TaskMessage, User, Workspace, WorkTask
 from .knowledge_processing import process_knowledge_document
+from .task_processing import process_work_task
 from .nia import stream_reply
-from .schemas import AssistantCreate, AssistantResponse, AssistantUpdate, CatalogDepartment, CatalogRole, ConversationCreate, ConversationResponse, KnowledgeDocumentResponse, LoginRequest, MessageCreate, MessageResponse, PasswordResetRequest, RegisterRequest, TokenResponse, UserResponse, WorkspaceResponse
+from .schemas import AssistantCreate, AssistantResponse, AssistantUpdate, CatalogDepartment, CatalogRole, ConversationCreate, ConversationResponse, KnowledgeDocumentResponse, LoginRequest, MemberAdd, MemberResponse, MessageCreate, MessageResponse, PasswordResetRequest, RegisterRequest, TaskMessageCreate, TaskMessageResponse, TokenResponse, UserResponse, WorkspaceResponse, WorkTaskCreate, WorkTaskResponse
 from .security import create_access_token, hash_password, verify_password
 
 router = APIRouter(prefix="/api/v1")
@@ -93,6 +95,26 @@ def request_password_reset(_: PasswordResetRequest) -> dict[str, str]:
 @router.get("/workspaces", response_model=list[WorkspaceResponse])
 def list_workspaces(user: Annotated[User, Depends(get_current_user)], session: SessionDependency) -> list[Workspace]:
     return list(session.scalars(select(Workspace).join(Membership).where(Membership.user_id == user.id).order_by(Workspace.name)))
+
+
+@router.get("/members", response_model=list[MemberResponse])
+def list_members(workspace: Annotated[Workspace, Depends(get_workspace)], session: SessionDependency) -> list[dict]:
+    rows = session.execute(select(Membership, User).join(User, User.id == Membership.user_id).where(Membership.workspace_id == workspace.id).order_by(User.full_name)).all()
+    return [{"id": membership.id, "user_id": user.id, "email": user.email, "full_name": user.full_name, "role": membership.role, "created_at": membership.created_at} for membership, user in rows]
+
+
+@router.post("/members", response_model=MemberResponse, status_code=status.HTTP_201_CREATED)
+def add_member(payload: MemberAdd, workspace: Annotated[Workspace, Depends(get_admin_workspace)], session: SessionDependency) -> dict:
+    user = session.scalar(select(User).where(User.email == payload.email.lower()))
+    if user is None:
+        raise HTTPException(status_code=404, detail="Ask this employee to create an EUNIA account first, then add their email here")
+    if session.scalar(select(Membership).where(Membership.workspace_id == workspace.id, Membership.user_id == user.id)):
+        raise HTTPException(status_code=409, detail="This employee already belongs to the workspace")
+    membership = Membership(workspace_id=workspace.id, user_id=user.id, role=payload.role)
+    session.add(membership)
+    session.commit()
+    session.refresh(membership)
+    return {"id": membership.id, "user_id": user.id, "email": user.email, "full_name": user.full_name, "role": membership.role, "created_at": membership.created_at}
 
 
 @router.get("/catalog/departments", response_model=list[CatalogDepartment])
@@ -222,6 +244,83 @@ def retry_knowledge_document(assistant_id: str, document_id: str, background_tas
     session.refresh(document)
     background_tasks.add_task(process_knowledge_document, document.id)
     return document
+
+
+def task_for_workspace(task_id: str, workspace: Workspace, session: Session) -> WorkTask:
+    task = session.get(WorkTask, task_id)
+    if task is None or task.workspace_id != workspace.id:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task
+
+
+@router.get("/work/tasks", response_model=list[WorkTaskResponse])
+def list_work_tasks(workspace: Annotated[Workspace, Depends(get_workspace)], session: SessionDependency) -> list[WorkTask]:
+    return list(session.scalars(select(WorkTask).where(WorkTask.workspace_id == workspace.id).order_by(WorkTask.created_at.desc())))
+
+
+@router.post("/work/tasks", response_model=WorkTaskResponse, status_code=status.HTTP_201_CREATED)
+def create_work_task(payload: WorkTaskCreate, background_tasks: BackgroundTasks, workspace: Annotated[Workspace, Depends(get_workspace)], user: Annotated[User, Depends(get_current_user)], session: SessionDependency) -> WorkTask:
+    assistant = assistant_for_workspace(payload.assistant_id, workspace, session)
+    if assistant.status != "active":
+        raise HTTPException(status_code=409, detail="Activate and train this AI employee before assigning work")
+    task = WorkTask(workspace_id=workspace.id, created_by=user.id, supervisor_id=user.id, **payload.model_dump())
+    session.add(task)
+    session.flush()
+    session.add(TaskMessage(task_id=task.id, workspace_id=workspace.id, author_type="user", author_user_id=user.id, author_name=user.full_name, kind="assignment", content=payload.instructions))
+    session.add(TaskMessage(task_id=task.id, workspace_id=workspace.id, author_type="assistant", author_name=assistant.name, kind="status", content=f"I have received ‘{payload.title}’. I’ll review the brief and approved company knowledge, then return the result for supervisor review."))
+    session.commit()
+    session.refresh(task)
+    background_tasks.add_task(process_work_task, task.id)
+    return task
+
+
+@router.get("/work/tasks/{task_id}/messages", response_model=list[TaskMessageResponse])
+def list_task_messages(task_id: str, workspace: Annotated[Workspace, Depends(get_workspace)], session: SessionDependency) -> list[TaskMessage]:
+    task_for_workspace(task_id, workspace, session)
+    return list(session.scalars(select(TaskMessage).where(TaskMessage.task_id == task_id, TaskMessage.workspace_id == workspace.id).order_by(TaskMessage.created_at)))
+
+
+@router.post("/work/tasks/{task_id}/messages", response_model=TaskMessageResponse, status_code=status.HTTP_201_CREATED)
+def add_task_message(task_id: str, payload: TaskMessageCreate, workspace: Annotated[Workspace, Depends(get_workspace)], user: Annotated[User, Depends(get_current_user)], session: SessionDependency) -> TaskMessage:
+    task_for_workspace(task_id, workspace, session)
+    message = TaskMessage(task_id=task_id, workspace_id=workspace.id, author_type="user", author_user_id=user.id, author_name=user.full_name, content=payload.content)
+    session.add(message)
+    session.commit()
+    session.refresh(message)
+    return message
+
+
+@router.post("/work/tasks/{task_id}/approve", response_model=WorkTaskResponse)
+def approve_work_task(task_id: str, workspace: Annotated[Workspace, Depends(get_workspace)], user: Annotated[User, Depends(get_current_user)], session: SessionDependency) -> WorkTask:
+    task = task_for_workspace(task_id, workspace, session)
+    membership = session.scalar(select(Membership).where(Membership.workspace_id == workspace.id, Membership.user_id == user.id))
+    if task.supervisor_id != user.id and membership and membership.role not in {"owner", "admin"}:
+        raise HTTPException(status_code=403, detail="Only the assigned supervisor or an administrator can approve this result")
+    if task.status != "awaiting_review":
+        raise HTTPException(status_code=409, detail="This task is not awaiting review")
+    task.status = "completed"
+    task.stage = "Approved and complete"
+    task.progress = 100
+    task.completed_at = datetime.now(timezone.utc)
+    session.add(TaskMessage(task_id=task.id, workspace_id=workspace.id, author_type="user", author_user_id=user.id, author_name=user.full_name, kind="approval", content="Result reviewed and approved. The task is complete."))
+    session.commit()
+    session.refresh(task)
+    return task
+
+
+@router.post("/work/tasks/{task_id}/retry", response_model=WorkTaskResponse)
+def retry_work_task(task_id: str, background_tasks: BackgroundTasks, workspace: Annotated[Workspace, Depends(get_workspace)], user: Annotated[User, Depends(get_current_user)], session: SessionDependency) -> WorkTask:
+    task = task_for_workspace(task_id, workspace, session)
+    if task.status != "failed":
+        raise HTTPException(status_code=409, detail="Only failed tasks can be retried")
+    task.status = "queued"
+    task.stage = "Waiting for the AI employee"
+    task.progress = 5
+    session.add(TaskMessage(task_id=task.id, workspace_id=workspace.id, author_type="user", author_user_id=user.id, author_name=user.full_name, kind="status", content="Requested another attempt."))
+    session.commit()
+    session.refresh(task)
+    background_tasks.add_task(process_work_task, task.id)
+    return task
 
 
 @router.get("/conversations", response_model=list[ConversationResponse])

@@ -9,8 +9,9 @@ def test_registration_and_assistant_access_are_workspace_scoped(tmp_path, monkey
 
     # Import after configuring the isolated test database.
     from app.main import app
-    from app.database import Base, engine
+    from app.database import Base, SessionLocal, engine
     from app import knowledge_processing, routers
+    from app.models import TaskMessage, WorkTask
     monkeypatch.setattr(routers, "UPLOAD_DIR", tmp_path / "uploads")
     monkeypatch.setattr(knowledge_processing, "UPLOAD_DIR", tmp_path / "uploads")
     Base.metadata.create_all(engine)
@@ -42,6 +43,38 @@ def test_registration_and_assistant_access_are_workspace_scoped(tmp_path, monkey
         assert updated.status_code == 200
         assert updated.json()["status"] == "draft"
         assert updated.json()["instructions"] == "Escalate uncertain analysis."
+
+        reactivated = client.patch(f"/api/v1/assistants/{assistant_id}", headers=tenant_headers, json={
+            "name": "Aria", "department": "data", "role_template_id": "data-analyst", "status": "active", "access_level": "admins_only", "instructions": "Escalate uncertain analysis.",
+        })
+        assert reactivated.status_code == 200
+
+        def complete_task(task_id: str):
+            with SessionLocal() as task_session:
+                task = task_session.get(WorkTask, task_id)
+                task.status = "awaiting_review"
+                task.stage = "Ready for supervisor review"
+                task.progress = 90
+                task.result = "Grounded analysis result"
+                task_session.add(TaskMessage(task_id=task.id, workspace_id=task.workspace_id, author_type="assistant", author_name="Aria", kind="result", content=task.result))
+                task_session.commit()
+
+        monkeypatch.setattr(routers, "process_work_task", complete_task)
+        assigned = client.post("/api/v1/work/tasks", headers=tenant_headers, json={
+            "assistant_id": assistant_id, "title": "Analyse monthly costs", "instructions": "Review the monthly costs and explain the largest changes.", "expected_output": "A concise management summary", "priority": "high",
+        })
+        assert assigned.status_code == 201
+        task_id = assigned.json()["id"]
+        assert client.get("/api/v1/work/tasks", headers=tenant_headers).json()[0]["status"] == "awaiting_review"
+        task_messages = client.get(f"/api/v1/work/tasks/{task_id}/messages", headers=tenant_headers)
+        assert task_messages.status_code == 200
+        assert len(task_messages.json()) == 3
+        comment = client.post(f"/api/v1/work/tasks/{task_id}/messages", headers=tenant_headers, json={"content": "Please confirm the figures."})
+        assert comment.status_code == 201
+        approved = client.post(f"/api/v1/work/tasks/{task_id}/approve", headers=tenant_headers)
+        assert approved.status_code == 200
+        assert approved.json()["status"] == "completed"
+        assert approved.json()["progress"] == 100
 
         listing = client.get("/api/v1/assistants", headers=tenant_headers)
         assert listing.status_code == 200
@@ -88,6 +121,12 @@ def test_registration_and_assistant_access_are_workspace_scoped(tmp_path, monkey
         other_auth = {"Authorization": f"Bearer {other_registration.json()['access_token']}"}
         other_workspace_id = client.get("/api/v1/workspaces", headers=other_auth).json()[0]["id"]
         other_headers = other_auth | {"X-Workspace-Id": other_workspace_id}
+        assert client.get(f"/api/v1/work/tasks/{task_id}/messages", headers=other_headers).status_code == 404
+        added_member = client.post("/api/v1/members", headers=tenant_headers, json={"email": "owner@other.example", "role": "member"})
+        assert added_member.status_code == 201
+        employee_company_headers = other_auth | {"X-Workspace-Id": workspace_id}
+        assert client.get("/api/v1/work/tasks", headers=employee_company_headers).status_code == 200
+        assert client.post("/api/v1/members", headers=employee_company_headers, json={"email": "nobody@example.com", "role": "admin"}).status_code == 403
         assert client.get(f"/api/v1/assistants/{assistant_id}/knowledge", headers=other_headers).status_code == 404
         assert client.patch(f"/api/v1/assistants/{assistant_id}", headers=other_headers, json={
             "name": "Stolen", "department": "data", "role_template_id": "data-analyst", "status": "active", "access_level": "workspace", "instructions": None,

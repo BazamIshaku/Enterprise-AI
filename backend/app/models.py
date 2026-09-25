@@ -85,6 +85,38 @@ class KnowledgeChunk(TimestampedModel, Base):
     token_estimate: Mapped[int] = mapped_column(Integer)
 
 
+class WorkTask(TimestampedModel, Base):
+    __tablename__ = "work_tasks"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    assistant_id: Mapped[str] = mapped_column(ForeignKey("assistants.id", ondelete="RESTRICT"), index=True)
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
+    supervisor_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
+    title: Mapped[str] = mapped_column(String(180))
+    instructions: Mapped[str] = mapped_column(Text)
+    expected_output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    priority: Mapped[str] = mapped_column(String(16), default="normal")
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(24), default="queued")
+    stage: Mapped[str] = mapped_column(String(100), default="Waiting for the AI employee")
+    progress: Mapped[int] = mapped_column(Integer, default=5)
+    risk_level: Mapped[str] = mapped_column(String(16), default="standard")
+    result: Mapped[str | None] = mapped_column(Text, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class TaskMessage(TimestampedModel, Base):
+    __tablename__ = "task_messages"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    task_id: Mapped[str] = mapped_column(ForeignKey("work_tasks.id", ondelete="CASCADE"), index=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    author_type: Mapped[str] = mapped_column(String(16))
+    author_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    author_name: Mapped[str] = mapped_column(String(120))
+    kind: Mapped[str] = mapped_column(String(24), default="message")
+    content: Mapped[str] = mapped_column(Text)
+
+
 class Conversation(TimestampedModel, Base):
     __tablename__ = "conversations"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)

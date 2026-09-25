@@ -10,14 +10,18 @@ load_dotenv()
 
 from .routers import router
 from .knowledge_processing import resume_pending_documents
+from .task_processing import resume_pending_tasks
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     recovery = asyncio.create_task(asyncio.to_thread(resume_pending_documents))
+    task_recovery = asyncio.create_task(asyncio.to_thread(resume_pending_tasks))
     yield
     if not recovery.done():
         recovery.cancel()
+    if not task_recovery.done():
+        task_recovery.cancel()
 
 
 app = FastAPI(title="EUNIA API", version="0.1.0", lifespan=lifespan)

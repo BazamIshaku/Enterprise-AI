@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { WorkspaceShell } from "@/components/workspace-shell";
 import { useSession } from "@/components/session-provider";
 import { createAssistant, listAssistants, listDepartments, listRoleTemplates, updateAssistant, type Department, type EuniaAssistant, type RoleTemplate } from "@/lib/eunia-api";
@@ -100,7 +101,7 @@ export default function AssistantsPage() {
         <p className={styles.department}>{assistant.department}</p><h2>{assistant.name}</h2><p className={styles.role}>{assistant.role}</p>
         <div className={styles.capabilities}>{assistant.capabilities.slice(0, 3).map((capability) => <span key={capability}>{capability}</span>)}</div>
         <div className={styles.governance}><span>{assistant.access_level === "admins_only" ? "Admin managed" : "Workspace managed"}</span><span>Knowledge ready for upload</span></div>
-        <button className={styles.manageButton} type="button" onClick={() => openEdit(assistant)}>Manage employee <span>→</span></button>
+        <div className={styles.cardActions}><Link href={`/work?employee=${assistant.id}`}>Open work desk</Link><button className={styles.manageButton} type="button" onClick={() => openEdit(assistant)}>Manage <span>→</span></button></div>
       </article>)}
       {!visibleRoster.length && <div className={styles.empty}><span>✦</span><h2>No AI employees found</h2><p>Change the department or search, or create a new role-based employee.</p></div>}
       <button className={styles.createCard} type="button" onClick={openCreate}><span>+</span><strong>Create an AI employee</strong><small>Choose a department and a governed starter role.</small></button>
