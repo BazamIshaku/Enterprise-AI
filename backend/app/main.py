@@ -1,4 +1,6 @@
 """EUNIA FastAPI application entry point."""
+import asyncio
+from contextlib import asynccontextmanager
 import os
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -7,8 +9,18 @@ from fastapi.middleware.cors import CORSMiddleware
 load_dotenv()
 
 from .routers import router
+from .knowledge_processing import resume_pending_documents
 
-app = FastAPI(title="EUNIA API", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    recovery = asyncio.create_task(asyncio.to_thread(resume_pending_documents))
+    yield
+    if not recovery.done():
+        recovery.cancel()
+
+
+app = FastAPI(title="EUNIA API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:3000").split(","), allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 app.include_router(router)
 

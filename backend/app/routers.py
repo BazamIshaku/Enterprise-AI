@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -14,6 +14,7 @@ from .database import get_session
 from .catalog import DEPARTMENTS, DEPARTMENT_BY_ID, ROLE_BY_ID, ROLE_TEMPLATES
 from .dependencies import get_admin_workspace, get_current_user, get_workspace
 from .models import Assistant, Conversation, KnowledgeDocument, Membership, Message, User, Workspace
+from .knowledge_processing import process_knowledge_document
 from .nia import stream_reply
 from .schemas import AssistantCreate, AssistantResponse, AssistantUpdate, CatalogDepartment, CatalogRole, ConversationCreate, ConversationResponse, KnowledgeDocumentResponse, LoginRequest, MessageCreate, MessageResponse, PasswordResetRequest, RegisterRequest, TokenResponse, UserResponse, WorkspaceResponse
 from .security import create_access_token, hash_password, verify_password
@@ -165,7 +166,7 @@ def list_knowledge_documents(assistant_id: str, workspace: Annotated[Workspace, 
 
 
 @router.post("/assistants/{assistant_id}/knowledge", response_model=KnowledgeDocumentResponse, status_code=status.HTTP_201_CREATED)
-async def upload_knowledge_document(assistant_id: str, file: Annotated[UploadFile, File()], workspace: Annotated[Workspace, Depends(get_admin_workspace)], user: Annotated[User, Depends(get_current_user)], session: SessionDependency) -> KnowledgeDocument:
+async def upload_knowledge_document(assistant_id: str, background_tasks: BackgroundTasks, file: Annotated[UploadFile, File()], workspace: Annotated[Workspace, Depends(get_admin_workspace)], user: Annotated[User, Depends(get_current_user)], session: SessionDependency) -> KnowledgeDocument:
     assistant_for_workspace(assistant_id, workspace, session)
     original_name = Path(file.filename or "").name
     suffix = Path(original_name).suffix.lower()
@@ -201,6 +202,25 @@ async def upload_knowledge_document(assistant_id: str, file: Annotated[UploadFil
     session.add(document)
     session.commit()
     session.refresh(document)
+    background_tasks.add_task(process_knowledge_document, document.id)
+    return document
+
+
+@router.post("/assistants/{assistant_id}/knowledge/{document_id}/retry", response_model=KnowledgeDocumentResponse)
+def retry_knowledge_document(assistant_id: str, document_id: str, background_tasks: BackgroundTasks, workspace: Annotated[Workspace, Depends(get_admin_workspace)], session: SessionDependency) -> KnowledgeDocument:
+    assistant_for_workspace(assistant_id, workspace, session)
+    document = session.get(KnowledgeDocument, document_id)
+    if document is None or document.assistant_id != assistant_id or document.workspace_id != workspace.id:
+        raise HTTPException(status_code=404, detail="Training file not found")
+    if document.status == "processing":
+        raise HTTPException(status_code=409, detail="This training file is already being processed")
+    document.status = "queued"
+    document.stage = "Waiting securely in the training queue"
+    document.progress = 5
+    document.feedback = "Training has been queued again. Progress will update automatically."
+    session.commit()
+    session.refresh(document)
+    background_tasks.add_task(process_knowledge_document, document.id)
     return document
 
 

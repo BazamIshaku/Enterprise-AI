@@ -3,7 +3,7 @@
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { WorkspaceShell } from "@/components/workspace-shell";
 import { useSession } from "@/components/session-provider";
-import { listAssistants, listKnowledgeDocuments, uploadKnowledgeDocument, type EuniaAssistant, type KnowledgeDocument } from "@/lib/eunia-api";
+import { listAssistants, listKnowledgeDocuments, retryKnowledgeDocument, uploadKnowledgeDocument, type EuniaAssistant, type KnowledgeDocument } from "@/lib/eunia-api";
 import styles from "./page.module.css";
 
 const acceptedTypes = ".pdf,.docx,.txt,.csv,.png,.jpg,.jpeg,.webp";
@@ -19,6 +19,7 @@ export default function KnowledgePage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [retryingId, setRetryingId] = useState("");
 
   useEffect(() => {
     if (!session) return;
@@ -29,6 +30,14 @@ export default function KnowledgePage() {
     if (!session || !selectedId) return;
     listKnowledgeDocuments(session.token, session.workspace.id, selectedId).then(setDocuments).catch((reason) => setError(reason instanceof Error ? reason.message : "Unable to load training files."));
   }, [selectedId, session]);
+
+  useEffect(() => {
+    if (!session || !selectedId || !documents.some((document) => document.status === "queued" || document.status === "processing")) return;
+    const timer = window.setInterval(() => {
+      listKnowledgeDocuments(session.token, session.workspace.id, selectedId).then(setDocuments).catch(() => undefined);
+    }, 1500);
+    return () => window.clearInterval(timer);
+  }, [documents, selectedId, session]);
 
   const selected = employees.find((employee) => employee.id === selectedId);
   const visibleDocuments = useMemo(() => documents.filter((document) => document.file_name.toLowerCase().includes(query.trim().toLowerCase())), [documents, query]);
@@ -46,6 +55,16 @@ export default function KnowledgePage() {
     finally { setUploading(false); }
   }
 
+  async function retry(document: KnowledgeDocument) {
+    if (!session || !selected) return;
+    setRetryingId(document.id); setError("");
+    try {
+      const queued = await retryKnowledgeDocument(session.token, session.workspace.id, selected.id, document.id);
+      setDocuments((items) => items.map((item) => item.id === queued.id ? queued : item));
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to restart training."); }
+    finally { setRetryingId(""); }
+  }
+
   return <WorkspaceShell>
     <section className={styles.heading}><div><p>KNOWLEDGE & TRAINING</p><h1>Teach your AI workforce</h1><span>Assign confidential company knowledge to the employee who needs it.</span></div><div className={styles.secureBadge}><span>⌾</span><div><strong>Private by design</strong><small>Files stay inside this workspace</small></div></div></section>
 
@@ -58,7 +77,7 @@ export default function KnowledgePage() {
           {message && <div className={styles.confirmation}><span>✓</span><p><strong>Upload received</strong>{message}</p></div>}
           {error && <p className={styles.error}>{error}</p>}
           <div className={styles.libraryHeader}><div><h3>Training library</h3><span>{documents.length} {documents.length === 1 ? "file" : "files"}</span></div><label><span>⌕</span><input aria-label="Search training files" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search files" type="search" /></label></div>
-          <div className={styles.fileList}>{visibleDocuments.map((document) => <article key={document.id}><span className={styles.fileIcon}>{document.content_type.startsWith("image/") ? "IMG" : document.file_name.split(".").pop()?.toUpperCase()}</span><div><h4>{document.file_name}</h4><p>{formatSize(document.size_bytes)} · Uploaded {new Date(document.created_at).toLocaleDateString()}</p><small>{document.feedback}</small></div><span className={styles.queued}><i />{document.status === "queued" ? "Queued for review" : document.status}</span></article>)}{!visibleDocuments.length && <div className={styles.noFiles}><span>▱</span><p>{query ? "No files match your search." : `No training files have been assigned to ${selected.name} yet.`}</p></div>}</div>
+          <div className={styles.fileList}>{visibleDocuments.map((document) => <article key={document.id}><span className={styles.fileIcon}>{document.content_type.startsWith("image/") ? "IMG" : document.file_name.split(".").pop()?.toUpperCase()}</span><div className={styles.fileDetails}><div className={styles.fileTitle}><div><h4>{document.file_name}</h4><p>{formatSize(document.size_bytes)} · Uploaded {new Date(document.created_at).toLocaleDateString()}</p></div><span className={`${styles.statusPill} ${styles[document.status]}`}><i />{document.status === "ready" ? "Training complete" : document.status === "failed" ? "Needs attention" : document.status === "processing" ? "Training" : "Queued"}</span></div><div className={styles.progressHeader}><span>{document.stage}</span><strong>{document.progress}%</strong></div><div className={styles.progressTrack} role="progressbar" aria-label={`Training progress for ${document.file_name}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={document.progress}><span className={document.status === "failed" ? styles.failedBar : ""} style={{ width: `${document.progress}%` }} /></div><small>{document.feedback}</small>{document.status === "failed" && <button className={styles.retryButton} disabled={retryingId === document.id} type="button" onClick={() => retry(document)}>{retryingId === document.id ? "Restarting…" : "Retry training"}</button>}</div></article>)}{!visibleDocuments.length && <div className={styles.noFiles}><span>▱</span><p>{query ? "No files match your search." : `No training files have been assigned to ${selected.name} yet.`}</p></div>}</div>
         </>}
       </section>
     </div>}

@@ -10,8 +10,9 @@ def test_registration_and_assistant_access_are_workspace_scoped(tmp_path, monkey
     # Import after configuring the isolated test database.
     from app.main import app
     from app.database import Base, engine
-    from app import routers
+    from app import knowledge_processing, routers
     monkeypatch.setattr(routers, "UPLOAD_DIR", tmp_path / "uploads")
+    monkeypatch.setattr(knowledge_processing, "UPLOAD_DIR", tmp_path / "uploads")
     Base.metadata.create_all(engine)
 
     with TestClient(app) as client:
@@ -60,6 +61,12 @@ def test_registration_and_assistant_access_are_workspace_scoped(tmp_path, monkey
         assert uploaded.status_code == 201
         assert uploaded.json()["status"] == "queued"
         assert "review" in uploaded.json()["feedback"].lower()
+        processed = client.get(f"/api/v1/assistants/{assistant_id}/knowledge", headers=tenant_headers)
+        assert processed.status_code == 200
+        assert processed.json()[0]["status"] == "ready"
+        assert processed.json()[0]["progress"] == 100
+        assert processed.json()[0]["chunk_count"] >= 1
+        assert "training complete" in processed.json()[0]["feedback"].lower()
 
         disguised_file = client.post(
             f"/api/v1/assistants/{assistant_id}/knowledge",

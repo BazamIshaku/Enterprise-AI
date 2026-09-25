@@ -90,6 +90,10 @@ class KnowledgeDocumentResponse(BaseModel):
     content_type: str
     size_bytes: int
     status: str
+    stage: str
+    progress: int
+    chunk_count: int
+    processed_at: datetime | None
     feedback: str
     created_at: datetime
 

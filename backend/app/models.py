@@ -2,7 +2,7 @@
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, JSON, String, Text, UniqueConstraint, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .database import Base
@@ -66,7 +66,23 @@ class KnowledgeDocument(TimestampedModel, Base):
     content_type: Mapped[str] = mapped_column(String(120))
     size_bytes: Mapped[int] = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(String(24), default="queued")
+    stage: Mapped[str] = mapped_column(String(80), default="Waiting securely in the training queue")
+    progress: Mapped[int] = mapped_column(Integer, default=5)
+    chunk_count: Mapped[int] = mapped_column(Integer, default=0)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     feedback: Mapped[str] = mapped_column(Text, default="Securely uploaded. This AI employee will review the file and report when knowledge processing is complete.")
+
+
+class KnowledgeChunk(TimestampedModel, Base):
+    __tablename__ = "knowledge_chunks"
+    __table_args__ = (UniqueConstraint("document_id", "sequence", name="uq_knowledge_chunk_document_sequence"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    document_id: Mapped[str] = mapped_column(ForeignKey("knowledge_documents.id", ondelete="CASCADE"), index=True)
+    assistant_id: Mapped[str] = mapped_column(ForeignKey("assistants.id", ondelete="CASCADE"), index=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    sequence: Mapped[int] = mapped_column(Integer)
+    content: Mapped[str] = mapped_column(Text)
+    token_estimate: Mapped[int] = mapped_column(Integer)
 
 
 class Conversation(TimestampedModel, Base):
