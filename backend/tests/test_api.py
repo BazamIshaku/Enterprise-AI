@@ -35,6 +35,13 @@ def test_registration_and_assistant_access_are_workspace_scoped(tmp_path, monkey
         assert created.json()["department"] == "Data & Analytics"
         assistant_id = created.json()["id"]
 
+        updated = client.patch(f"/api/v1/assistants/{assistant_id}", headers=tenant_headers, json={
+            "name": "Aria", "department": "data", "role_template_id": "data-analyst", "status": "draft", "access_level": "admins_only", "instructions": "Escalate uncertain analysis.",
+        })
+        assert updated.status_code == 200
+        assert updated.json()["status"] == "draft"
+        assert updated.json()["instructions"] == "Escalate uncertain analysis."
+
         listing = client.get("/api/v1/assistants", headers=tenant_headers)
         assert listing.status_code == 200
         assert [assistant["name"] for assistant in listing.json()] == ["Aria"]
@@ -75,3 +82,6 @@ def test_registration_and_assistant_access_are_workspace_scoped(tmp_path, monkey
         other_workspace_id = client.get("/api/v1/workspaces", headers=other_auth).json()[0]["id"]
         other_headers = other_auth | {"X-Workspace-Id": other_workspace_id}
         assert client.get(f"/api/v1/assistants/{assistant_id}/knowledge", headers=other_headers).status_code == 404
+        assert client.patch(f"/api/v1/assistants/{assistant_id}", headers=other_headers, json={
+            "name": "Stolen", "department": "data", "role_template_id": "data-analyst", "status": "active", "access_level": "workspace", "instructions": None,
+        }).status_code == 404

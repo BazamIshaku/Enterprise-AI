@@ -59,6 +59,15 @@ class AssistantResponse(AssistantCreate):
     updated_at: datetime
 
 
+class AssistantUpdate(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+    department: str = Field(min_length=2, max_length=120)
+    role_template_id: str = Field(min_length=2, max_length=80)
+    status: Literal["active", "draft"]
+    access_level: Literal["admins_only", "workspace"]
+    instructions: str | None = Field(default=None, max_length=8000)
+
+
 class CatalogDepartment(BaseModel):
     id: str
     name: str

@@ -15,7 +15,7 @@ from .catalog import DEPARTMENTS, DEPARTMENT_BY_ID, ROLE_BY_ID, ROLE_TEMPLATES
 from .dependencies import get_admin_workspace, get_current_user, get_workspace
 from .models import Assistant, Conversation, KnowledgeDocument, Membership, Message, User, Workspace
 from .nia import stream_reply
-from .schemas import AssistantCreate, AssistantResponse, CatalogDepartment, CatalogRole, ConversationCreate, ConversationResponse, KnowledgeDocumentResponse, LoginRequest, MessageCreate, MessageResponse, PasswordResetRequest, RegisterRequest, TokenResponse, UserResponse, WorkspaceResponse
+from .schemas import AssistantCreate, AssistantResponse, AssistantUpdate, CatalogDepartment, CatalogRole, ConversationCreate, ConversationResponse, KnowledgeDocumentResponse, LoginRequest, MessageCreate, MessageResponse, PasswordResetRequest, RegisterRequest, TokenResponse, UserResponse, WorkspaceResponse
 from .security import create_access_token, hash_password, verify_password
 
 router = APIRouter(prefix="/api/v1")
@@ -133,6 +133,28 @@ def assistant_for_workspace(assistant_id: str, workspace: Workspace, session: Se
     assistant = session.get(Assistant, assistant_id)
     if assistant is None or assistant.workspace_id != workspace.id:
         raise HTTPException(status_code=404, detail="AI employee not found")
+    return assistant
+
+
+@router.patch("/assistants/{assistant_id}", response_model=AssistantResponse)
+def update_assistant(assistant_id: str, payload: AssistantUpdate, workspace: Annotated[Workspace, Depends(get_admin_workspace)], session: SessionDependency) -> Assistant:
+    assistant = assistant_for_workspace(assistant_id, workspace, session)
+    department = DEPARTMENT_BY_ID.get(payload.department)
+    role = ROLE_BY_ID.get(payload.role_template_id)
+    if department is None:
+        raise HTTPException(status_code=422, detail="Choose a valid department")
+    if role is None or role["department_id"] != payload.department:
+        raise HTTPException(status_code=422, detail="Choose a role that belongs to this department")
+    assistant.name = payload.name
+    assistant.department = department["name"]
+    assistant.role_template_id = role["id"]
+    assistant.role = role["name"]
+    assistant.capabilities = role["capabilities"]
+    assistant.status = payload.status
+    assistant.access_level = payload.access_level
+    assistant.instructions = payload.instructions
+    session.commit()
+    session.refresh(assistant)
     return assistant
 
 
