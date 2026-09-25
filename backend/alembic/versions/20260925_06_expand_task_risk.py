@@ -9,8 +9,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.alter_column("work_tasks", "risk_level", existing_type=sa.String(length=16), type_=sa.String(length=24), existing_nullable=False)
+    with op.batch_alter_table("work_tasks") as batch:
+        batch.alter_column("risk_level", existing_type=sa.String(length=16), type_=sa.String(length=24), existing_nullable=False)
 
 
 def downgrade() -> None:
-    op.alter_column("work_tasks", "risk_level", existing_type=sa.String(length=24), type_=sa.String(length=16), existing_nullable=False)
+    with op.batch_alter_table("work_tasks") as batch:
+        batch.alter_column("risk_level", existing_type=sa.String(length=24), type_=sa.String(length=16), existing_nullable=False)
