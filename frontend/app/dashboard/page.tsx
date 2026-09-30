@@ -9,98 +9,6 @@ import styles from "./page.module.css";
 
 const suggestions = ["Summarise this week's priorities", "Prepare a customer briefing", "Find the latest brand guidelines"];
 const conversationKey = "eunia.activeConversation";
-let activeNiaSpeech: { utterance: SpeechSynthesisUtterance; finish: () => void } | null = null;
-let niaSpeechSession = 0;
-
-type SpeechResult = {
-  0: { transcript: string };
-  isFinal: boolean;
-};
-
-type SpeechResultEvent = Event & {
-  results: { [index: number]: SpeechResult; length: number };
-};
-
-type BrowserSpeechRecognition = {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  onend: (() => void) | null;
-  onerror: ((event: Event & { error: string }) => void) | null;
-  onresult: ((event: SpeechResultEvent) => void) | null;
-  start: () => void;
-  stop: () => void;
-  abort: () => void;
-};
-
-type BrowserSpeechWindow = Window & typeof globalThis & {
-  SpeechRecognition?: new () => BrowserSpeechRecognition;
-  webkitSpeechRecognition?: new () => BrowserSpeechRecognition;
-};
-
-function stopNiaVoice() {
-  niaSpeechSession += 1;
-  window.speechSynthesis?.cancel();
-  activeNiaSpeech?.finish();
-  activeNiaSpeech = null;
-}
-
-function speechText(markdown: string) {
-  return markdown
-    .replace(/```[\s\S]*?```/g, " I have included the code in the chat. ")
-    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-    .replace(/[\*_~`|]+/g, "")
-    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
-    .replace(/^\s*(?:[-+]\s+|\d+[.)]\s+)/gm, "")
-    .replace(/^\s*>\s?/gm, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function takeSpeechChunk(buffer: string, flush = false) {
-  const boundary = /[.!?](?=\s|$)/g;
-  let lastBoundary = -1;
-  let match: RegExpExecArray | null;
-
-  while ((match = boundary.exec(buffer)) !== null) lastBoundary = match.index + 1;
-  if (lastBoundary > 0) return [buffer.slice(0, lastBoundary), buffer.slice(lastBoundary)];
-  if (flush) return [buffer, ""];
-  if (buffer.length < 140) return ["", buffer];
-
-  const cutAt = buffer.lastIndexOf(" ", 118);
-  return [buffer.slice(0, cutAt > 0 ? cutAt : 118), buffer.slice(cutAt > 0 ? cutAt : 118)];
-}
-
-async function speakNiaChunk(text: string, session: number, onStatus: (status: "speaking" | "ready") => void) {
-  const spokenText = speechText(text);
-  if (!spokenText || session !== niaSpeechSession) return;
-
-  if (!("speechSynthesis" in window)) throw new Error("Voice playback is not supported by this browser.");
-  const utterance = new SpeechSynthesisUtterance(spokenText);
-  utterance.rate = 1.08;
-  utterance.pitch = 1;
-
-  await new Promise<void>((resolve) => {
-    let settled = false;
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      utterance.onend = null;
-      utterance.onerror = null;
-      if (activeNiaSpeech?.utterance === utterance) activeNiaSpeech = null;
-      resolve();
-    };
-
-    activeNiaSpeech = { utterance, finish };
-    utterance.onend = finish;
-    utterance.onerror = finish;
-    onStatus("speaking");
-    window.speechSynthesis.speak(utterance);
-  });
-
-  if (session === niaSpeechSession) onStatus("ready");
-}
 
 export default function DashboardPage() {
   const { session } = useSession();
@@ -109,21 +17,8 @@ export default function DashboardPage() {
   const [messages, setMessages] = useState<NiaMessage[]>([]);
   const [conversationId, setConversationId] = useState("");
   const [error, setError] = useState("");
-  const [voiceError, setVoiceError] = useState("");
-  const [voiceInputError, setVoiceInputError] = useState("");
   const [thinking, setThinking] = useState(false);
-  const [voiceEnabled, setVoiceEnabled] = useState(false);
-  const [voiceStatus, setVoiceStatus] = useState<"off" | "loading" | "ready" | "speaking">("off");
-  const [voiceTapping, setVoiceTapping] = useState(false);
-  const [listening, setListening] = useState(false);
   const messagePane = useRef<HTMLDivElement>(null);
-  const voiceRequested = useRef(false);
-  const recognition = useRef<BrowserSpeechRecognition | null>(null);
-  const transcript = useRef("");
-  const promptBeforeListening = useRef("");
-  const submitTranscript = useRef(false);
-  const voiceInputFailed = useRef(false);
-  const voiceInputStopping = useRef(false);
 
   useEffect(() => {
     if (!session) return;
@@ -140,132 +35,9 @@ export default function DashboardPage() {
     messagePane.current?.scrollTo({ top: messagePane.current.scrollHeight, behavior: "smooth" });
   }, [messages, thinking]);
 
-  useEffect(() => () => {
-    recognition.current?.abort();
-    stopNiaVoice();
-  }, []);
-
-  async function enableNiaVoice() {
-    voiceRequested.current = true;
-    setVoiceEnabled(true);
-    setVoiceStatus("loading");
-    setVoiceError("");
-
-    try {
-      if (!("speechSynthesis" in window)) throw new Error("Voice playback is unavailable");
-      if (voiceRequested.current) setVoiceStatus("ready");
-    } catch {
-      voiceRequested.current = false;
-      setVoiceEnabled(false);
-      setVoiceStatus("off");
-      setVoiceError("NIA's voice is not supported by this browser.");
-    }
-  }
-
-  function toggleVoice() {
-    setVoiceTapping(true);
-    window.setTimeout(() => setVoiceTapping(false), 420);
-
-    if (recognition.current) {
-      submitTranscript.current = false;
-      recognition.current.abort();
-    }
-
-    if (voiceEnabled) {
-      voiceRequested.current = false;
-      stopNiaVoice();
-      setVoiceEnabled(false);
-      setVoiceStatus("off");
-      setVoiceError("");
-      return;
-    }
-
-    void enableNiaVoice();
-  }
-
   async function send(event: FormEvent) {
     event.preventDefault();
     await submitNiaPrompt(prompt);
-  }
-
-  function startVoiceInput() {
-    if (thinking || recognition.current) return;
-
-    const browserWindow = window as BrowserSpeechWindow;
-    const SpeechRecognition = browserWindow.SpeechRecognition ?? browserWindow.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      setVoiceInputError("Voice input is available in the latest Chrome or Edge. Please use one of those browsers and allow microphone access.");
-      return;
-    }
-
-    if (voiceRequested.current) {
-      stopNiaVoice();
-      setVoiceStatus("ready");
-    }
-
-    const nextRecognition = new SpeechRecognition();
-    recognition.current = nextRecognition;
-    transcript.current = "";
-    promptBeforeListening.current = prompt;
-    submitTranscript.current = false;
-    voiceInputFailed.current = false;
-    voiceInputStopping.current = false;
-    setVoiceInputError("");
-    setPrompt("");
-    nextRecognition.continuous = false;
-    nextRecognition.interimResults = true;
-    nextRecognition.lang = "en-US";
-
-    nextRecognition.onresult = (event) => {
-      const nextTranscript = Array.from({ length: event.results.length }, (_, index) => event.results[index][0].transcript)
-        .join("")
-        .trim();
-      transcript.current = nextTranscript;
-      setPrompt(nextTranscript);
-    };
-
-    nextRecognition.onerror = (event) => {
-      if (event.error === "aborted") return;
-      voiceInputFailed.current = true;
-      const message = event.error === "not-allowed" || event.error === "service-not-allowed"
-        ? "Microphone access is blocked. Allow it in your browser, then try Talk again."
-        : event.error === "no-speech"
-          ? "NIA did not hear anything. Hold Talk while you speak, then release it."
-          : "NIA could not hear you clearly. Please try Talk again.";
-      setVoiceInputError(message);
-    };
-
-    nextRecognition.onend = () => {
-      const spokenPrompt = transcript.current.trim();
-      const shouldSubmit = submitTranscript.current;
-      recognition.current = null;
-      submitTranscript.current = false;
-      voiceInputStopping.current = false;
-      setListening(false);
-
-      if (shouldSubmit && spokenPrompt && !voiceInputFailed.current) {
-        void submitNiaPrompt(spokenPrompt);
-      } else if (!spokenPrompt) {
-        setPrompt(promptBeforeListening.current);
-      }
-    };
-
-    try {
-      nextRecognition.start();
-      setListening(true);
-    } catch {
-      recognition.current = null;
-      voiceInputStopping.current = false;
-      setPrompt(promptBeforeListening.current);
-      setVoiceInputError("NIA could not start voice input. Please try Talk again.");
-    }
-  }
-
-  function finishVoiceInput() {
-    if (!recognition.current || voiceInputStopping.current) return;
-    voiceInputStopping.current = true;
-    submitTranscript.current = true;
-    recognition.current.stop();
   }
 
   async function submitNiaPrompt(rawPrompt: string) {
@@ -275,13 +47,6 @@ export default function DashboardPage() {
     setPrompt("");
     setThinking(true);
     setError("");
-    setVoiceError("");
-    setVoiceInputError("");
-    const speechSession = voiceRequested.current ? (() => {
-      stopNiaVoice();
-      setVoiceStatus("ready");
-      return niaSpeechSession;
-    })() : -1;
     let activeConversationId = conversationId;
     const localUser: NiaMessage = {
       id: `user-${Date.now()}`,
@@ -310,57 +75,17 @@ export default function DashboardPage() {
       };
       setMessages((items) => [...items, localUser, localAssistant]);
 
-      let speechBuffer = "";
-      let speechQueue = Promise.resolve();
-      let speechFailed = false;
-
-      const queueSpeech = (chunk: string) => {
-        if (!chunk || speechFailed || speechSession !== niaSpeechSession || !voiceRequested.current) return;
-
-        speechQueue = speechQueue
-          .then(() => speakNiaChunk(chunk, speechSession, setVoiceStatus))
-          .catch(() => {
-            if (speechSession === niaSpeechSession) {
-              speechFailed = true;
-              setVoiceStatus("ready");
-              setVoiceError("NIA generated a response, but the audio could not play. Try the Voice button again.");
-            }
-          });
-      };
-
-      const queueAvailableSpeech = (flush = false) => {
-        while (speechBuffer) {
-          const [chunk, remainder] = takeSpeechChunk(speechBuffer, flush);
-          speechBuffer = remainder;
-          if (!chunk) break;
-          queueSpeech(chunk);
-        }
-      };
-
       await streamNiaReply(session.token, session.workspace.id, activeConversationId, content, (delta) => {
-        speechBuffer += delta;
-        queueAvailableSpeech();
         setMessages((items) => items.map((message) => (
           message.id === assistantId ? { ...message, content: message.content + delta } : message
         )));
       });
-      queueAvailableSpeech(true);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "NIA could not respond.");
     } finally {
       setThinking(false);
     }
   }
-
-  const voiceDescription = listening
-    ? "Listening... release Talk to send"
-    : !voiceEnabled
-      ? "Your secure AI workspace"
-      : voiceStatus === "loading"
-        ? "Preparing NIA's female AI voice..."
-        : voiceStatus === "speaking"
-          ? "NIA is speaking"
-          : "Female AI voice ready";
 
   return (
     <WorkspaceShell>
@@ -378,7 +103,7 @@ export default function DashboardPage() {
           <Image className={styles.euniaMark} src="/brand/eunia-nia-mark.png" alt="" width={34} height={34} priority />
           <div>
             <strong>Ask NIA</strong>
-            <span>{voiceDescription}</span>
+            <span>Your secure AI workspace</span>
           </div>
           <span className={styles.secure}>{"\u25cf"} Private &amp; secure</span>
         </div>
@@ -397,8 +122,6 @@ export default function DashboardPage() {
             </article>
           ))}
           {error && <p className={styles.error}>{error}</p>}
-          {voiceError && <p className={styles.error}>{voiceError}</p>}
-          {voiceInputError && <p className={styles.error}>{voiceInputError}</p>}
         </div>
 
         <form className={styles.composer} onSubmit={send}>
@@ -416,53 +139,9 @@ export default function DashboardPage() {
               ))}
             </div>
             <div className={styles.composerActions}>
-              <button
-                className={`${styles.voiceOrb} ${voiceEnabled ? styles.voiceOrbActive : ""} ${voiceTapping ? styles.voiceOrbTapping : ""}`}
-                type="button"
-                onClick={toggleVoice}
-                aria-pressed={voiceEnabled}
-                aria-label={voiceEnabled ? "Turn NIA voice off" : "Turn NIA voice on"}
-                title={voiceEnabled ? "Turn NIA's spoken replies off" : "Turn NIA's spoken replies on"}
-              >
-                <span className={styles.voiceOrbRings} aria-hidden="true" />
-                <span className={styles.voiceOrbSpeaker} aria-hidden="true" />
-                <span className={styles.voiceOrbLabel}>{voiceEnabled ? "Voice on" : "Voice"}</span>
+              <button className={styles.sendButton} aria-label="Send request" disabled={thinking} type="submit">
+                {thinking ? "..." : "\u2191"}
               </button>
-              <div className={styles.submitActions}>
-                <button
-                  className={`${styles.talkButton} ${listening ? styles.talkButtonListening : ""}`}
-                  type="button"
-                  disabled={thinking}
-                  onPointerDown={(event) => {
-                    event.preventDefault();
-                    event.currentTarget.setPointerCapture(event.pointerId);
-                    startVoiceInput();
-                  }}
-                  onPointerUp={finishVoiceInput}
-                  onPointerCancel={finishVoiceInput}
-                  onLostPointerCapture={finishVoiceInput}
-                  onKeyDown={(event) => {
-                    if (!event.repeat && (event.key === " " || event.key === "Enter")) {
-                      event.preventDefault();
-                      startVoiceInput();
-                    }
-                  }}
-                  onKeyUp={(event) => {
-                    if (event.key === " " || event.key === "Enter") {
-                      event.preventDefault();
-                      finishVoiceInput();
-                    }
-                  }}
-                  aria-label={listening ? "Listening. Release to send your message" : "Hold to talk to NIA"}
-                  title={listening ? "Release to send" : "Hold to talk"}
-                >
-                  <span className={styles.talkMic} aria-hidden="true" />
-                  <span>{listening ? "Listening" : "Talk"}</span>
-                </button>
-                <button className={styles.sendButton} aria-label="Send request" disabled={thinking} type="submit">
-                  {thinking ? "..." : "\u2191"}
-                </button>
-              </div>
             </div>
           </div>
         </form>
